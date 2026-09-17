@@ -1,0 +1,107 @@
+package integration_tests
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/datastax/zdm-proxy/integration-tests/setup"
+	"github.com/datastax/zdm-proxy/integration-tests/utils"
+
+	"github.com/apache/cassandra-gocql-driver/v2"
+)
+
+// BasicBatch tests basic batch statement functionality
+// The test runs a basic batch statement, which includes an insert and update,
+// and then runs an insert and update after to make sure it works
+func TestBasicBatch(t *testing.T) {
+	proxyInstance, err := NewProxyInstanceForGlobalCcmClusters(t)
+	require.Nil(t, err)
+	defer proxyInstance.Shutdown()
+
+	originCluster, targetCluster, err := SetupOrGetGlobalCcmClusters(t)
+	require.Nil(t, err)
+
+	// Initialize test data
+	data := [][]string{
+		{"cf0f4cf0-8c20-11ea-9fc6-6d2c86545d91", "MSzZMTWA9hw6tkYWPTxT0XfGL9nGQUpy"},
+		{"d1b05da0-8c20-11ea-9fc6-6d2c86545d91", "IH0FC3aWM4ynriOFvtr5TfiKxziR5aB1"},
+		{"eed574b0-8c20-11ea-9fc6-6d2c86545d91", "FgQfJesbNcxAebzFPRRcW2p1bBtoz1P1"},
+	}
+	// Seed originCluster and targetCluster w/ schema and data
+	setup.SeedData(originCluster.GetSession(), targetCluster.GetSession(), setup.TasksModel, data)
+
+	// Connect to proxy as a "client"
+	proxy, err := utils.ConnectToCluster("127.0.0.1", "", "", 14002)
+
+	if err != nil {
+		t.Log("Unable to connect to proxy session.")
+		t.Fatal(err)
+	}
+
+	defer proxy.Close()
+
+	// Run queries on proxied connection
+
+	// Batch statement: Update to katelyn, Insert terrance
+	b := proxy.NewBatch(gocql.LoggedBatch)
+	b.Query(fmt.Sprintf("UPDATE %s.%s SET task = 'katelyn' WHERE id = d1b05da0-8c20-11ea-9fc6-6d2c86545d91", setup.TestKeyspace, setup.TasksModel))
+	b.Query(fmt.Sprintf("INSERT INTO %s.%s (id, task) VALUES (d1b05da0-8c20-11ea-9fc6-6d2c86545d92 ,'terrance')", setup.TestKeyspace, setup.TasksModel))
+
+	err = proxy.ExecuteBatch(b)
+	if err != nil {
+		t.Log("Batch failed.")
+		t.Fatal(err)
+	}
+
+	// Update: terrance --> kelvin
+	err = proxy.Query(fmt.Sprintf("UPDATE %s.%s SET task = 'kelvin' WHERE id = d1b05da0-8c20-11ea-9fc6-6d2c86545d92;", setup.TestKeyspace, setup.TasksModel)).Exec()
+	if err != nil {
+		t.Log("Post-batch update failed.")
+		t.Fatal(err)
+	}
+
+	// Insert isabelle
+	err = proxy.Query(fmt.Sprintf("INSERT INTO %s.%s (id, task) VALUES (d1b05da0-8c20-11ea-9fc6-6d2c86545d93 ,'isabelle');", setup.TestKeyspace, setup.TasksModel)).Exec()
+	if err != nil {
+		t.Log("Post-batch insert failed.")
+		t.Fatal(err)
+	}
+
+	// Update: isabelle --> ryan
+	err = proxy.Query(fmt.Sprintf("UPDATE %s.%s SET task = 'ryan' WHERE id = d1b05da0-8c20-11ea-9fc6-6d2c86545d93;", setup.TestKeyspace, setup.TasksModel)).Exec()
+	if err != nil {
+		t.Log("Post-batch update failed.")
+		t.Fatal(err)
+	}
+
+	// Assertions!
+
+	// Check katelyn
+	itr := proxy.Query(fmt.Sprintf("SELECT * FROM %s.%s WHERE id = d1b05da0-8c20-11ea-9fc6-6d2c86545d91;", setup.TestKeyspace, setup.TasksModel)).Iter()
+	row := make(map[string]interface{})
+
+	require.True(t, itr.MapScan(row))
+	task := setup.MapToTask(row)
+
+	setup.AssertEqual(t, "katelyn", task.Task)
+
+	// Check kelvin
+	itr = proxy.Query(fmt.Sprintf("SELECT * FROM %s.%s WHERE id = d1b05da0-8c20-11ea-9fc6-6d2c86545d92;", setup.TestKeyspace, setup.TasksModel)).Iter()
+	row = make(map[string]interface{})
+
+	require.True(t, itr.MapScan(row))
+	task = setup.MapToTask(row)
+
+	setup.AssertEqual(t, "kelvin", task.Task)
+
+	// Check ryan
+	itr = proxy.Query(fmt.Sprintf("SELECT * FROM %s.%s WHERE id = d1b05da0-8c20-11ea-9fc6-6d2c86545d93;", setup.TestKeyspace, setup.TasksModel)).Iter()
+	row = make(map[string]interface{})
+
+	require.True(t, itr.MapScan(row))
+	task = setup.MapToTask(row)
+
+	setup.AssertEqual(t, "ryan", task.Task)
+}

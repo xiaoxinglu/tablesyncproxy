@@ -1,0 +1,19 @@
+cluster_contact_points: 10.0.0.1
+cluster_username: cassandra
+cluster_password: cassandra
+cluster_port: 9042
+
+proxy_listen_address: "0.0.0.0"
+proxy_listen_port: 9042
+
+log_level: "INFO"
+
+table_mappings:
+  - name: users-by-email
+    enabled: true
+    source:
+      keyspace: app
+      table: users_by_id
+    target:
+      keyspace: app
+      table: users_by_email
